@@ -4,3 +4,9 @@ app/build/
 *.iml
 .idea/
 .DS_Store
+
+# Android release signing material must never be committed.
+*.jks
+*.keystore
+*.p12
+key.properties
