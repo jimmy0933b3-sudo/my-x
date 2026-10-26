@@ -4,6 +4,13 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+val ciStorePath = System.getenv("MYX_KEYSTORE_PATH")
+val ciStorePassword = System.getenv("MYX_KEYSTORE_PASSWORD")
+val ciKeyAlias = System.getenv("MYX_KEY_ALIAS")
+val ciKeyPassword = System.getenv("MYX_KEY_PASSWORD")
+val hasCiSigning = listOf(ciStorePath, ciStorePassword, ciKeyAlias, ciKeyPassword)
+    .all { !it.isNullOrBlank() }
+
 android {
     namespace = "com.example.xdownloader"
     compileSdk = 34
@@ -12,8 +19,8 @@ android {
         applicationId = "com.example.xdownloader"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = System.getenv("CI_VERSION_CODE")?.toIntOrNull() ?: 1
+        versionName = System.getenv("CI_VERSION_NAME") ?: "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -21,8 +28,22 @@ android {
         }
     }
 
+    signingConfigs {
+        if (hasCiSigning) {
+            create("ciRelease") {
+                storeFile = file(requireNotNull(ciStorePath))
+                storePassword = requireNotNull(ciStorePassword)
+                keyAlias = requireNotNull(ciKeyAlias)
+                keyPassword = requireNotNull(ciKeyPassword)
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (hasCiSigning) {
+                signingConfig = signingConfigs.getByName("ciRelease")
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
