@@ -101,16 +101,21 @@ jobs:
         run: |
           set -euo pipefail
           tag="v1.0.$GITHUB_RUN_NUMBER"
-          apk="app/build/outputs/apk/release/app-release.apk"
+          cp "app/build/outputs/apk/release/app-release.apk" "my-x.apk"
+          sha256sum my-x.apk > my-x.apk.sha256
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" "$apk#my-x.apk" --clobber
+            gh release upload "$tag" my-x.apk my-x.apk.sha256 --clobber
+            gh release edit "$tag" --latest
           else
-            gh release create "$tag" "$apk#my-x.apk" \
+            gh release create "$tag" my-x.apk my-x.apk.sha256 \
               --target "$GITHUB_SHA" \
               --title "My X $tag" \
               --notes "Signed Android APK built from master commit $GITHUB_SHA." \
               --latest
           fi
+          assets="$(gh release view "$tag" --json assets --jq '.assets[].name')"
+          grep -Fxq "my-x.apk" <<< "$assets"
+          grep -Fxq "my-x.apk.sha256" <<< "$assets"
       - name: Delete older releases and their release tags
         run: |
           set -euo pipefail
