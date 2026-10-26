@@ -1,38 +1,123 @@
-name: Build Android APK
+name: Build and Release Android APK
 
 on:
   push:
-    branches: [ "main", "master", "fix/*", "feature/*" ]
+    branches: [master, "fix/*", "feature/*"]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [master]
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   build:
+    name: Test and build debug APK
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout project
+      - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set up JDK 17
-        uses: actions/setup-java@v5
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
         with:
+          distribution: temurin
           java-version: '17'
-          distribution: 'temurin'
-          cache: 'gradle'
-
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
-
-      - name: Run Unit Tests
-        run: ./gradlew testDebugUnitTest
-
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug
-
-      - name: Upload Debug APK
+          cache: gradle
+      - name: Unit tests
+        run: bash ./gradlew testDebugUnitTest
+      - name: Build debug APK
+        run: bash ./gradlew assembleDebug
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug
+          name: my-x-debug
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+  release:
+    name: Sign and publish latest APK
+    needs: build
+    if: ${{ github.ref == 'refs/heads/master' && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: my-x-latest-release
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - name: Verify required signing secrets and decode keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for key in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [[ -z "${!key:-}" ]]; then
+              echo "::error::Missing Actions secret: $key"
+              exit 1
+            fi
+          done
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/my-x-release.jks"
+          test -s "$RUNNER_TEMP/my-x-release.jks"
+      - name: Build signed release APK
+        env:
+          MYX_KEYSTORE_PATH: ${{ runner.temp }}/my-x-release.jks
+          MYX_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          MYX_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          MYX_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          CI_VERSION_CODE: ${{ github.run_number }}
+          CI_VERSION_NAME: 1.0.${{ github.run_number }}
+        run: bash ./gradlew assembleRelease
+      - name: Verify APK signature
+        run: |
+          set -euo pipefail
+          apk="app/build/outputs/apk/release/app-release.apk"
+          test -s "$apk"
+          apksigner="$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -type f -name apksigner | sort -V | tail -n 1)"
+          test -n "$apksigner"
+          "$apksigner" verify --verbose "$apk"
+      - name: Ensure this is still the current master
+        run: |
+          set -euo pipefail
+          master_sha="$(gh api "repos/$GITHUB_REPOSITORY/branches/master" --jq '.commit.sha')"
+          if [[ "$master_sha" != "$GITHUB_SHA" ]]; then
+            echo "::error::master advanced since this run. Refusing to replace its release with an older build."
+            exit 1
+          fi
+      - name: Publish signed APK
+        run: |
+          set -euo pipefail
+          tag="v1.0.$GITHUB_RUN_NUMBER"
+          apk="app/build/outputs/apk/release/app-release.apk"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$apk#my-x.apk" --clobber
+          else
+            gh release create "$tag" "$apk#my-x.apk" \
+              --target "$GITHUB_SHA" \
+              --title "My X $tag" \
+              --notes "Signed Android APK built from master commit $GITHUB_SHA." \
+              --latest
+          fi
+      - name: Delete older releases and their release tags
+        run: |
+          set -euo pipefail
+          current_tag="v1.0.$GITHUB_RUN_NUMBER"
+          gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" --jq '.[].tag_name' |
+            while IFS= read -r old_tag; do
+              if [[ -n "$old_tag" && "$old_tag" != "$current_tag" ]]; then
+                gh release delete "$old_tag" --yes --cleanup-tag
+              fi
+            done
