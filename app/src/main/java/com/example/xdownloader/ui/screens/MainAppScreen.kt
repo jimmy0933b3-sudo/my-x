@@ -77,7 +77,7 @@ fun MainAppScreen() {
             startDestination = "home",
             modifier = Modifier.padding(padding)
         ) {
-            composable("home") { HomeScreen() }
+            composable("home") { HomeScreen(onOpenSettings = { navController.navigate("settings") }) }
             composable("search") { SearchAuthorScreen() }
             composable("favorites") { FavoritesScreen() }
             composable("downloads") { DownloadsScreen() }
