@@ -1,201 +1,155 @@
 package com.example.xdownloader.ui.screens
 
-import android.content.Context
-import android.webkit.CookieManager
 import android.widget.Toast
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Logout
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.example.xdownloader.api.ApiResult
 import com.example.xdownloader.api.AuthManager
 import com.example.xdownloader.api.XApiClient
+import com.example.xdownloader.ui.components.PageHeading
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(navController: NavController) {
     val context = LocalContext.current
-    val authManager = remember { AuthManager.getInstance(context) }
-    val isConfigured by authManager.authState.collectAsState()
-
-    val apiClient = remember { XApiClient(context) }
+    val auth = remember { AuthManager.getInstance(context) }
+    val api = remember { XApiClient(context) }
     val scope = rememberCoroutineScope()
+    val configured by auth.authState.collectAsState()
+    var verifying by remember { mutableStateOf(false) }
+    var resultText by remember { mutableStateOf<String?>(null) }
 
-    var isVerifying by remember { mutableStateOf(false) }
-    var verificationStatus by remember { mutableStateOf<String?>(null) }
-
-    var showAdvanced by remember { mutableStateOf(false) }
-
-    // Advanced settings states
-    var manualAuthToken by remember { mutableStateOf(authManager.getAuthToken() ?: "") }
-    var manualCt0 by remember { mutableStateOf(authManager.getCt0() ?: "") }
-
-    LaunchedEffect(isConfigured) {
-        if (isConfigured) {
-            verificationStatus = "✅ 已登入"
-        }
-    }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(title = { Text("設定 (Settings)") })
-        }
-    ) { padding ->
-        Column(
-            modifier = Modifier
-                .padding(padding)
-                .padding(16.dp)
-                .fillMaxSize()
+    Column(
+        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 20.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp)
+    ) {
+        PageHeading("設定", "帳號、連接狀態與隱私")
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            shape = MaterialTheme.shapes.large
         ) {
-            Text("X (Twitter) 登入憑證", style = MaterialTheme.typography.titleMedium)
-            Spacer(modifier = Modifier.height(8.dp))
-
-            if (!isConfigured) {
-                Text("尚未登入 X，請點擊下方按鈕登入。", style = MaterialTheme.typography.bodyMedium)
-                Spacer(modifier = Modifier.height(16.dp))
-                Button(
-                    onClick = { navController.navigate("login") },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("登入 X")
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        color = if (configured) MaterialTheme.colorScheme.primaryContainer
+                            else MaterialTheme.colorScheme.surfaceVariant,
+                        shape = MaterialTheme.shapes.medium
+                    ) {
+                        Icon(
+                            if (configured) Icons.Default.CheckCircle else Icons.Default.Person,
+                            contentDescription = null,
+                            tint = if (configured) MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(13.dp).size(26.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    Column(Modifier.weight(1f)) {
+                        Text(if (configured) "已連接 X 工作階段" else "尚未連接 X",
+                            style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            if (configured) "憑證儲存在此裝置的加密儲存空間"
+                            else "使用原生介面連接既有工作階段",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
                 }
-            } else {
-                Text("狀態: ${verificationStatus ?: "未知"}", style = MaterialTheme.typography.bodyMedium)
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (resultText != null) {
+                    Text(requireNotNull(resultText),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        style = MaterialTheme.typography.bodySmall)
+                }
+                if (configured) {
                     Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !verifying,
                         onClick = {
                             scope.launch {
-                                isVerifying = true
-                                verificationStatus = "驗證中..."
-                                val result = apiClient.verifyCredentials()
-                                verificationStatus = when (result) {
-                                    is ApiResult.Success<*> -> "✅ 驗證成功 (@${result.data})"
-                                    is ApiResult.Unauthorized -> "❌ 未授權: ${result.message}"
-                                    is ApiResult.RateLimited -> "❌ 限流: ${result.message}"
-                                    is ApiResult.NetworkError -> "❌ 網路錯誤: ${result.message}"
-                                    is ApiResult.ParsingError -> "❌ 解析錯誤: ${result.message}"
-                                }
-                                isVerifying = false
+                                verifying = true
+                                try {
+                                    resultText = when (val result = api.verifyCredentials()) {
+                                        is ApiResult.Success -> "驗證成功：@" + result.data
+                                        is ApiResult.Unauthorized -> result.message
+                                        is ApiResult.RateLimited -> result.message
+                                        is ApiResult.NetworkError -> result.message
+                                        is ApiResult.ParsingError -> result.message
+                                    }
+                                } catch (e: Exception) {
+                                    resultText = e.message ?: "驗證失敗"
+                                } finally { verifying = false }
                             }
-                        },
-                        modifier = Modifier.weight(1f),
-                        enabled = !isVerifying
+                        }
                     ) {
-                        Text("重新檢查")
+                        if (verifying) CircularProgressIndicator(Modifier.size(18.dp))
+                        else Text("重新驗證連接")
                     }
-
                     OutlinedButton(
-                        onClick = {
-                            authManager.clearCredentials()
-                            android.webkit.CookieManager.getInstance().removeAllCookies(null)
-                            android.webkit.CookieManager.getInstance().flush()
-                            navController.navigate("login")
-                        },
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.fillMaxWidth(),
+                        onClick = { navController.navigate("login") }
                     ) {
-                        Text("切換帳號")
+                        Text("切換工作階段")
                     }
-                }
-
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(
-                    onClick = {
-                        authManager.clearCredentials()
-                        CookieManager.getInstance().removeAllCookies(null)
-                        CookieManager.getInstance().flush()
-                        verificationStatus = null
-                        manualAuthToken = ""
-                        manualCt0 = ""
-                        Toast.makeText(context, "已登出並清除憑證", Toast.LENGTH_SHORT).show()
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text("登出")
-                }
-            }
-
-            Spacer(modifier = Modifier.height(32.dp))
-
-            // Advanced settings section
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { showAdvanced = !showAdvanced }
-                    .padding(vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("進階設定 (手動輸入 Cookie)", style = MaterialTheme.typography.titleSmall)
-                Icon(
-                    imageVector = if (showAdvanced) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                    contentDescription = null
-                )
-            }
-
-            AnimatedVisibility(visible = showAdvanced) {
-                Column {
-                    Text("作為相容性備援，您可以手動輸入 auth_token 與 ct0。", style = MaterialTheme.typography.bodySmall)
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    OutlinedTextField(
-                        value = manualAuthToken,
-                        onValueChange = { manualAuthToken = it },
-                        label = { Text("auth_token") },
+                    TextButton(
                         modifier = Modifier.fillMaxWidth(),
-                        visualTransformation = PasswordVisualTransformation()
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    OutlinedTextField(
-                        value = manualCt0,
-                        onValueChange = { manualCt0 = it },
-                        label = { Text("ct0") },
-                        modifier = Modifier.fillMaxWidth(),
-                        visualTransformation = PasswordVisualTransformation()
-                    )
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
+                        onClick = {
+                            auth.clearCredentials()
+                            resultText = null
+                            Toast.makeText(context, "已清除本機登入憑證", Toast.LENGTH_SHORT).show()
+                        }
+                    ) {
+                        Icon(Icons.Default.Logout, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("登出並清除本機憑證")
+                    }
+                } else {
                     Button(
-                        onClick = {
-                            authManager.saveCredentials(manualAuthToken, manualCt0)
-                            Toast.makeText(context, "已儲存手動憑證", Toast.LENGTH_SHORT).show()
-
-                            scope.launch {
-                                isVerifying = true
-                                verificationStatus = "驗證中..."
-                                val result = apiClient.verifyCredentials()
-                                verificationStatus = when (result) {
-                                    is ApiResult.Success<*> -> "✅ 驗證成功 (@${result.data})"
-                                    is ApiResult.Unauthorized -> "❌ 未授權: ${result.message}"
-                                    is ApiResult.RateLimited -> "❌ 限流: ${result.message}"
-                                    is ApiResult.NetworkError -> "❌ 網路錯誤: ${result.message}"
-                                    is ApiResult.ParsingError -> "❌ 解析錯誤: ${result.message}"
-                                }
-                                isVerifying = false
-                            }
-                        },
                         modifier = Modifier.fillMaxWidth(),
-                        enabled = !isVerifying
+                        onClick = { navController.navigate("login") }
                     ) {
-                        Text("儲存並驗證")
+                        Icon(Icons.Default.Lock, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text("連接 X 帳號")
                     }
                 }
+            }
+        }
+
+        Card(
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+            shape = MaterialTheme.shapes.large
+        ) {
+            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("關於新版", style = MaterialTheme.typography.titleLarge)
+                Row(verticalAlignment = Alignment.Top, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
+                    Text(
+                        "所有主畫面、媒體預覽、搜尋、收藏與下載清單皆使用 Android 原生元件。登入頁也已移除 WebView。",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                HorizontalDivider()
+                Text(
+                    "目前仍以既有 X 工作階段憑證存取媒體；官方 OAuth 登入需申請 X Developer Client ID，並同步遷移 API。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
