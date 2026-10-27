@@ -28,7 +28,7 @@ class MainActivity : ComponentActivity() {
     private fun extractSharedPostUrl(intent: Intent?): String? {
         if (intent?.action != Intent.ACTION_SEND || intent.type != "text/plain") return null
         val text = intent.getStringExtra(Intent.EXTRA_TEXT) ?: return null
-        val pattern = Regex("""https?://(?:www\\.|mobile\\.)?(?:x\\.com|twitter\\.com)/[^\\s/]+/status/\\d+(?:[^\\s]*)?""")
+        val pattern = Regex("""https?://(?:www\.|mobile\.)?(?:x\.com|twitter\.com)/[^\s/]+/status/\d+(?:[^\s]*)?""")
         return pattern.find(text)?.value?.trimEnd('.', ')', ',', '。')
     }
 
