@@ -1,115 +1,135 @@
 package com.example.xdownloader.ui.screens
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Download
+import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.example.xdownloader.api.TweetParser
 import com.example.xdownloader.data.MediaItem
 import com.example.xdownloader.data.MediaType
 import com.example.xdownloader.database.AppDatabase
 import com.example.xdownloader.database.FavoriteEntity
+import com.example.xdownloader.ui.components.AuthorAvatar
 import com.example.xdownloader.ui.components.MediaDownloadBottomSheet
-import androidx.compose.material.icons.filled.Download
-import kotlinx.coroutines.flow.first
+import com.example.xdownloader.ui.components.MediaPreviewStrip
+import com.example.xdownloader.ui.components.NativeEmptyState
+import com.example.xdownloader.ui.components.PageHeading
 import kotlinx.coroutines.launch
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FavoritesScreen() {
     val context = LocalContext.current
     val db = remember { AppDatabase.getDatabase(context) }
+    val favorites by db.favoriteDao().getAllFavorites().collectAsState(initial = emptyList())
 
-    var favorites by remember { mutableStateOf<List<FavoriteEntity>>(emptyList()) }
-
-    LaunchedEffect(Unit) {
-        db.favoriteDao().getAllFavorites().collect {
-            favorites = it
+    if (favorites.isEmpty()) {
+        Column(Modifier.fillMaxSize().padding(16.dp)) {
+            PageHeading("我的收藏", "讓喜歡的圖片與影片有個家")
+            Spacer(Modifier.weight(1f))
+            NativeEmptyState(Icons.Default.Bookmark, "還沒有收藏", "點擊動態卡片的愛心，即可收藏喜愛的貼文。")
+            Spacer(Modifier.weight(1f))
         }
-    }
-
-    Scaffold(
-        topBar = { TopAppBar(title = { Text("最愛 (Favorites)") }) }
-    ) { padding ->
-        Box(modifier = Modifier.padding(padding).fillMaxSize()) {
-            if (favorites.isEmpty()) {
-                Text("沒有收藏任何貼文 (No favorites)", modifier = Modifier.align(Alignment.Center))
-            } else {
-                LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    items(favorites) { fav ->
-                        FavoriteCard(fav)
-                    }
+    } else {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(top = 20.dp, bottom = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            item {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    PageHeading("我的收藏", "隨時回來欣賞與下載", Modifier.weight(1f))
+                    AssistChip(onClick = {}, label = { Text(favorites.size.toString() + " 篇") })
                 }
             }
+            items(favorites, key = { it.tweetId }) { FavoriteCard(it) }
         }
     }
 }
 
 @Composable
 fun FavoriteCard(fav: FavoriteEntity) {
-    var showViewer by remember { mutableStateOf(false) }
-    var showDownloadSheet by remember { mutableStateOf(false) }
-    val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val db = AppDatabase.getDatabase(context)
+    val db = remember { AppDatabase.getDatabase(context) }
+    val scope = rememberCoroutineScope()
+    var showViewer by remember { mutableStateOf(false) }
+    var showSheet by remember { mutableStateOf(false) }
 
-    val urls = fav.mediaUrls.split(",").filter { it.isNotEmpty() }
-    val types = fav.mediaTypes.split(",").filter { it.isNotEmpty() }
-
-    val mediaItems = urls.indices.map {
-        MediaItem(
-            id = fav.tweetId + "_$it",
-            url = urls[it],
-            thumbnailUrl = "",
-            type = if (types.getOrNull(it) == "VIDEO") MediaType.VIDEO else MediaType.IMAGE
-        )
+    val urls = remember(fav.mediaUrls) { fav.mediaUrls.split(",").filter { it.isNotBlank() } }
+    val types = remember(fav.mediaTypes) { fav.mediaTypes.split(",") }
+    val thumbs = remember(fav.mediaThumbnails) { fav.mediaThumbnails.split(",") }
+    val media = remember(fav.tweetId, urls, types, thumbs) {
+        urls.mapIndexed { i, url ->
+            MediaItem(
+                id = fav.tweetId + "_" + i,
+                url = url,
+                thumbnailUrl = thumbs.getOrNull(i).orEmpty(),
+                type = if (types.getOrNull(i) == "VIDEO") MediaType.VIDEO else MediaType.IMAGE
+            )
+        }
     }
 
-    Card(modifier = Modifier.fillMaxWidth().padding(8.dp).clickable { if (mediaItems.isNotEmpty()) showViewer = true }) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("${fav.authorName} (@${fav.authorScreenName})", style = MaterialTheme.typography.titleMedium)
-                IconButton(onClick = {
-                    scope.launch {
-                        db.favoriteDao().deleteFavorite(fav)
-                        android.widget.Toast.makeText(context, "Removed from favorites", android.widget.Toast.LENGTH_SHORT).show()
-                    }
-                }) {
-                    Icon(androidx.compose.material.icons.Icons.Default.Close, contentDescription = "Remove")
+    Card(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp),
+        shape = MaterialTheme.shapes.large,
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AuthorAvatar(fav.authorAvatar, fav.authorName)
+                Spacer(Modifier.width(10.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(fav.authorName, style = MaterialTheme.typography.titleMedium)
+                    Text("@" + fav.authorScreenName,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+                IconButton(onClick = { scope.launch { db.favoriteDao().deleteFavorite(fav) } }) {
+                    Icon(Icons.Default.Close, contentDescription = "移除收藏")
                 }
             }
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(fav.text, style = MaterialTheme.typography.bodyMedium)
+            if (fav.text.isNotBlank()) Text(fav.text, style = MaterialTheme.typography.bodyMedium)
             if (fav.deleted) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Text("⚠️ 此貼文已被刪除或無法存取", color = MaterialTheme.colorScheme.error)
+                Text("貼文可能已刪除或無法存取", color = MaterialTheme.colorScheme.error)
             }
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                IconButton(onClick = { showDownloadSheet = true }) {
-                    Icon(androidx.compose.material.icons.Icons.Default.Download, contentDescription = "Download")
+            MediaPreviewStrip(items = media, onClick = { showViewer = true })
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(media.size.toString() + " 個媒體",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f))
+                FilledTonalButton(onClick = { showSheet = true }, enabled = media.isNotEmpty()) {
+                    Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("下載")
                 }
             }
         }
     }
 
-    if (showDownloadSheet && mediaItems.isNotEmpty()) {
-        MediaDownloadBottomSheet(mediaItems = mediaItems, onDismiss = { showDownloadSheet = false })
+    if (showSheet && media.isNotEmpty()) {
+        MediaDownloadBottomSheet(media, onDismiss = { showSheet = false })
     }
-
-    if (showViewer && mediaItems.isNotEmpty()) {
-        androidx.compose.ui.window.Dialog(onDismissRequest = { showViewer = false }, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                com.example.xdownloader.ui.components.MediaViewer(mediaItems)
-                IconButton(onClick = { showViewer = false }, modifier = Modifier.align(Alignment.TopStart).padding(16.dp)) {
-                    Icon(androidx.compose.material.icons.Icons.Default.Close, contentDescription = "Close", tint = androidx.compose.ui.graphics.Color.White)
+    if (showViewer && media.isNotEmpty()) {
+        androidx.compose.ui.window.Dialog(
+            onDismissRequest = { showViewer = false },
+            properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(Modifier.fillMaxSize()) {
+                com.example.xdownloader.ui.components.MediaViewer(media)
+                IconButton(
+                    onClick = { showViewer = false },
+                    modifier = Modifier.align(Alignment.TopStart).padding(16.dp)
+                ) {
+                    Icon(Icons.Default.Close, contentDescription = "關閉", tint = androidx.compose.ui.graphics.Color.White)
                 }
             }
         }
