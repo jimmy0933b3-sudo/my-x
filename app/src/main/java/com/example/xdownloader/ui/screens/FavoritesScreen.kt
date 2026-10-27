@@ -47,7 +47,9 @@ fun FavoritesScreen() {
                 Row(Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically) {
                     PageHeading("我的收藏", "隨時回來欣賞與下載", Modifier.weight(1f))
-                    AssistChip(onClick = {}, label = { Text(favorites.size.toString() + " 篇") })
+                    Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = MaterialTheme.shapes.small) {
+                        Text(favorites.size.toString() + " 篇", modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp), color = MaterialTheme.colorScheme.onPrimaryContainer)
+                    }
                 }
             }
             items(favorites, key = { it.tweetId }) { FavoriteCard(it) }
