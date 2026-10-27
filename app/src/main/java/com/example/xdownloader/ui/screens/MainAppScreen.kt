@@ -17,6 +17,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.navigation.compose.NavHost
@@ -25,10 +26,16 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 
 @Composable
-fun MainAppScreen() {
+fun MainAppScreen(sharedPostUrl: String? = null, onSharedPostConsumed: () -> Unit = {}) {
     val navController = rememberNavController()
     val entry by navController.currentBackStackEntryAsState()
     val route = entry?.destination?.route
+
+    LaunchedEffect(sharedPostUrl) {
+        if (!sharedPostUrl.isNullOrBlank()) {
+            navController.navigate("search") { launchSingleTop = true }
+        }
+    }
 
     val destinations = listOf(
         Triple("home", "動態", Icons.Default.Home),
@@ -78,7 +85,12 @@ fun MainAppScreen() {
             modifier = Modifier.padding(padding)
         ) {
             composable("home") { HomeScreen(onOpenSettings = { navController.navigate("settings") }) }
-            composable("search") { SearchAuthorScreen() }
+            composable("search") {
+                SearchAuthorScreen(
+                    incomingPostUrl = sharedPostUrl,
+                    onIncomingPostConsumed = onSharedPostConsumed
+                )
+            }
             composable("favorites") { FavoritesScreen() }
             composable("downloads") { DownloadsScreen() }
             composable("settings") { SettingsScreen(navController) }

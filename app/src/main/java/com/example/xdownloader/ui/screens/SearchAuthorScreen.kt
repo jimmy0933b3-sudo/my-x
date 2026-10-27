@@ -15,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.unit.dp
 import com.example.xdownloader.api.ApiResult
 import com.example.xdownloader.api.TweetParser
@@ -26,11 +27,12 @@ import com.example.xdownloader.ui.components.PageHeading
 import kotlinx.coroutines.launch
 
 @Composable
-fun SearchAuthorScreen() {
+fun SearchAuthorScreen(incomingPostUrl: String? = null, onIncomingPostConsumed: () -> Unit = {}) {
     val context = LocalContext.current
     val db = remember { AppDatabase.getDatabase(context) }
     val api = remember { XApiClient(context) }
     val scope = rememberCoroutineScope()
+    val clipboard = LocalClipboardManager.current
     val following by db.followDao().getAllFollowing().collectAsState(initial = emptyList())
 
     var author by remember { mutableStateOf("") }
@@ -39,6 +41,15 @@ fun SearchAuthorScreen() {
     var isFetching by remember { mutableStateOf(false) }
     var tweet by remember { mutableStateOf<TweetParser.ParsedTweet?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(incomingPostUrl) {
+        if (!incomingPostUrl.isNullOrBlank()) {
+            link = incomingPostUrl
+            tweet = null
+            error = null
+            onIncomingPostConsumed()
+        }
+    }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -117,8 +128,20 @@ fun SearchAuthorScreen() {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.Link, contentDescription = null, tint = MaterialTheme.colorScheme.secondary)
                         Spacer(Modifier.width(8.dp))
-                        Text("貼上貼文連結", style = MaterialTheme.typography.titleLarge)
+                        Text("貼上貼文連結", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                        TextButton(onClick = {
+                            clipboard.getText()?.text?.let {
+                                link = it
+                                error = null
+                                tweet = null
+                            }
+                        }) { Text("貼上") }
                     }
+                    Text(
+                        "免費模式：在 X 點選分享 → My X，或貼上貼文連結。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     OutlinedTextField(
                         value = link,
                         onValueChange = { link = it; error = null },
@@ -134,6 +157,8 @@ fun SearchAuthorScreen() {
                             val id = Regex("status/(\\d+)").find(link)?.groupValues?.get(1)
                             if (id == null) {
                                 error = "請貼上有效的 X 貼文網址"
+                            } else if (!api.isConfigured()) {
+                                error = "尚未連接 X 工作階段。免費解析需先到設定輸入既有的 auth_token 和 ct0。"
                             } else {
                                 scope.launch {
                                     isFetching = true
